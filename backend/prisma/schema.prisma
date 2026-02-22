@@ -1,0 +1,188 @@
+// Prisma Schema for Axentralab
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User Model
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  name          String?
+  emailVerified Boolean  @default(false) @map("email_verified")
+  verificationToken String? @map("verification_token")
+  resetToken    String?  @map("reset_token")
+  resetTokenExpiry DateTime? @map("reset_token_expiry")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  websites      Website[]
+  subscription  Subscription?
+  notifications NotificationSettings?
+  alerts        Alert[]
+
+  @@map("users")
+}
+
+// Website Model
+model Website {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  url             String
+  name            String
+  status          String   @default("pending") // online, offline, pending
+  lastChecked     DateTime? @map("last_checked")
+  uptimePercentage Float?  @default(100.0) @map("uptime_percentage")
+  // Optional deployment/connection info for backups/restores
+  siteType        String?  @map("site_type") // wordpress, other
+  ftpHost         String?  @map("ftp_host")
+  ftpPort         Int?     @map("ftp_port")
+  ftpUser         String?  @map("ftp_user")
+  ftpPassword     String?  @map("ftp_password")
+  sshHost         String?  @map("ssh_host")
+  sshPort         Int?     @map("ssh_port")
+  sshUser         String?  @map("ssh_user")
+  sshPrivateKey   String?  @map("ssh_private_key")
+  wpPath          String?  @map("wp_path")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checks          Check[]
+  backups         Backup[]
+  securityScans   SecurityScan[]
+  alerts          Alert[]
+
+  @@index([userId])
+  @@map("websites")
+}
+
+// Uptime Check Model
+model Check {
+  id            String   @id @default(uuid())
+  websiteId     String   @map("website_id")
+  statusCode    Int      @map("status_code")
+  responseTime  Int      @map("response_time") // in milliseconds
+  success       Boolean
+  errorMessage  String?  @map("error_message")
+  checkedAt     DateTime @default(now()) @map("checked_at")
+
+  website       Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, checkedAt])
+  @@map("checks")
+}
+
+// Backup Model
+model Backup {
+  id          String   @id @default(uuid())
+  websiteId   String   @map("website_id")
+  filePath    String   @map("file_path")
+  fileSize    BigInt   @map("file_size") // in bytes
+  status      String   @default("completed") // completed, failed, in_progress
+  backupType  String   @default("full") @map("backup_type") // full, incremental
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, createdAt])
+  @@map("backups")
+}
+
+// Security Scan Model
+model SecurityScan {
+  id            String   @id @default(uuid())
+  websiteId     String   @map("website_id")
+  scanType      String   @map("scan_type") // malware, vulnerability, ssl
+  status        String   // clean, infected, warning
+  threatsFound  Int      @default(0) @map("threats_found")
+  details       String?  // Store detailed scan results (JSON string)
+  scannedAt     DateTime @default(now()) @map("scanned_at")
+
+  website       Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, scannedAt])
+  @@map("security_scans")
+}
+
+// Alert Model
+model Alert {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  websiteId   String   @map("website_id")
+  type        String   // downtime, backup_failed, security_threat, ssl_expiring
+  severity    String   // info, warning, critical
+  message     String
+  resolved    Boolean  @default(false)
+  sentAt      DateTime @default(now()) @map("sent_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sentAt])
+  @@index([websiteId, sentAt])
+  @@map("alerts")
+}
+
+// Subscription Model
+model Subscription {
+  id                    String   @id @default(uuid())
+  userId                String   @unique @map("user_id")
+  stripeCustomerId      String?  @unique @map("stripe_customer_id")
+  stripeSubscriptionId  String?  @unique @map("stripe_subscription_id")
+  plan                  String   // starter, pro, agency
+  status                String   // active, canceled, past_due, trialing
+  currentPeriodStart    DateTime @map("current_period_start")
+  currentPeriodEnd      DateTime @map("current_period_end")
+  cancelAtPeriodEnd     Boolean  @default(false) @map("cancel_at_period_end")
+  trialEnd              DateTime? @map("trial_end")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Notification Settings Model
+model NotificationSettings {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  emailEnabled    Boolean  @default(true) @map("email_enabled")
+  smsEnabled      Boolean  @default(false) @map("sms_enabled")
+  slackEnabled    Boolean  @default(false) @map("slack_enabled")
+  slackWebhook    String?  @map("slack_webhook")
+  phoneNumber     String?  @map("phone_number")
+  downtimeAlerts  Boolean  @default(true) @map("downtime_alerts")
+  backupAlerts    Boolean  @default(true) @map("backup_alerts")
+  securityAlerts  Boolean  @default(true) @map("security_alerts")
+  weeklyReports   Boolean  @default(true) @map("weekly_reports")
+  monthlyReports  Boolean  @default(true) @map("monthly_reports")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
+
+// Report Model
+model Report {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  reportType  String   @map("report_type") // monthly, weekly, custom
+  filePath    String   @map("file_path")
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  @@index([userId, generatedAt])
+  @@map("reports")
+}
